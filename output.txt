@@ -1,0 +1,495 @@
+Please write a suitable README file for me, in the code markdown section. These are my project codes.
+
+===== ./esp8266_dht11_nodered.ino =====
+#include <ESP8266WiFi.h>
+#include <DHT.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
+
+/************************* Pin Definition *********************************/
+
+#define DHTPIN D2
+#define LED_PIN LED_BUILTIN  // Define the pin for the built-in LED
+
+String temp;
+String hum;
+
+#define DHTTYPE DHT11 // DHT 11
+DHT dht(DHTPIN, DHTTYPE);
+
+// Your WiFi credentials. Set password to "" for open networks.
+const char *ssid = "ssid";
+const char *password = "password";
+
+ESP8266WebServer server(80);
+
+void handleRoot() {
+  server.send(200, "text/plain", "hello from esp8266!");
+}
+
+void handleNotFound() {
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i = 0; i < server.args(); i++) {
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  server.send(404, "text/plain", message);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT); // Set LED pin as output
+  WiFi.begin(ssid, password);
+  Serial.println("");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+  dht.begin();
+  server.on("/", handleRoot);
+  server.on("/dht-temp", []() {
+    int t = dht.readTemperature();
+    temp = String(t);
+    server.send(200, "text/plain", temp);
+  });
+
+  server.on("/dht-hum", []() {
+    int h = dht.readHumidity();
+    hum = String(h);
+    server.send(200, "text/plain", hum);
+  });
+  server.onNotFound(handleNotFound);
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void loop() {
+  static unsigned long lastUpdateTime = 0;
+  const unsigned long interval = 2000;
+
+  if (millis() - lastUpdateTime >= interval) {
+    lastUpdateTime = millis();
+    int t = dht.readTemperature();
+    int h = dht.readHumidity();
+    if (t < 13 || t > 25 || h < 70 || h > 90) {
+      Serial.println("Conditions are not optimal for vermicomposting. LED is ON.");
+      digitalWrite(D0, HIGH); // Turn LED on
+    } else {
+      digitalWrite(D0, LOW); // Turn LED off
+      Serial.println("Conditions are optimal for vermicomposting. LED is OFF.");
+    }
+  }
+  server.handleClient();
+}
+
+
+===== ./esp8266_yl69_nodered.ino =====
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
+
+/************************* Pin Definition *********************************/
+int sensor_pin = A0; 
+
+// Your WiFi credentials. Set password to "" for open networks.
+const char *ssid = "ssid";
+const char *password = "password";
+
+ESP8266WebServer server(80);
+
+void handleRoot() {
+  server.send(200, "text/plain", "hello from esp8266!");
+}
+
+void handleNotFound() {
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i = 0; i < server.args(); i++) {
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  server.send(404, "text/plain", message);
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(ssid, password);
+  Serial.println("");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+  server.on("/", handleRoot);
+  server.on("/moisture", []() {
+    int m = analogRead(sensor_pin);
+    m = map(m, 750, 180, 0, 100);  
+    String moisture = String(m);
+    server.send(200, "text/plain", moisture);
+  });
+
+  server.onNotFound(handleNotFound);
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void loop() {
+  server.handleClient();
+}
+
+
+===== ./example_kaa/esp8266_dht11_kaa/esp8266_dht11_kaa.ino =====
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+
+#include "DHT.h"
+#define DHTPIN D2
+#define DHTTYPE DHT11
+
+const char* ssid = "S20";        // WiFi name
+const char* password = "bixx5003";    // WiFi password
+const char* mqtt_server = "mqtt.cloud.kaaiot.com";
+const String TOKEN = "esp8266";        // Endpoint token - you get (or specify) it during device provisioning
+const String APP_VERSION = "cov2he2c8hds7380365g-v1";  // Application version - you specify it during device provisioning
+
+const unsigned long fiveSeconds = 1 * 5 * 1000UL;
+static unsigned long lastPublish = 0 - fiveSeconds;
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+DHT dht(DHTPIN, DHTTYPE);
+
+void setup() {
+  Serial.begin(115200);
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+}
+
+float h_last = 0;
+float t_last = 0;
+
+void loop() {
+  delay(2000);
+  setup_wifi();
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  unsigned long now = millis();
+  if (now - lastPublish >= fiveSeconds) {
+    lastPublish += fiveSeconds;
+    DynamicJsonDocument telemetry(1023);
+    telemetry.createNestedObject();
+
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+    float f = dht.readTemperature(true);
+
+    if (isnan(h) || isnan(t) || isnan(f)) {
+      Serial.println(F("Failed to read from DHT sensor!"));
+      telemetry[0]["temperature"] = t_last;
+      telemetry[0]["humidity"] = h_last;
+    } else {
+      telemetry[0]["temperature"] = t;
+      telemetry[0]["humidity"] = h;
+      t_last = t;
+      h_last = h;
+    }
+    String topic = "kp1/" + APP_VERSION + "/dcx/" + TOKEN + "/json";
+    client.publish(topic.c_str(), telemetry.as<String>().c_str());
+    Serial.println("Published on topic: " + topic);
+  }
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.printf("\nHandling message on topic: %s\n", topic);
+
+  for (int i = 0; i < length; i++) {
+    Serial.print((char) payload[i]);
+  }
+
+  if (String(topic).endsWith("/command/SWITCH/status")) {
+    DynamicJsonDocument doc(1023);
+    deserializeJson(doc, payload, length);
+    JsonVariant json_var = doc.as<JsonVariant>();
+
+    DynamicJsonDocument commandResponse(1023);
+    for (int i = 0; i < json_var.size(); i++) {
+      unsigned int command_id = json_var[i]["id"].as<unsigned int>();
+      commandResponse.createNestedObject();
+      commandResponse[i]["id"] = command_id;
+      commandResponse[i]["statusCode"] = 200;
+      commandResponse[i]["payload"] = "done";
+    }
+
+    String responseTopic = "kp1/" + APP_VERSION + "/cex/" + TOKEN + "/result/SWITCH";
+    client.publish(responseTopic.c_str(), commandResponse.as<String>().c_str());
+    Serial.println("Published response to SWITCH command on topic: " + responseTopic);
+  }
+}
+
+void setup_wifi() {
+  if (WiFi.status() != WL_CONNECTED) {
+    delay(200);
+    Serial.println();
+    Serial.printf("Connecting to [%s]", ssid);
+    WiFi.begin(ssid, password);
+    connectWiFi();
+  }
+}
+
+void connectWiFi() {
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    Serial.println("Attempting MQTT connection...");
+    char *client_id = "client-id-123ab";
+    if (client.connect(client_id)) {
+      Serial.println("Connected to WiFi");
+      // ... and resubscribe
+      subscribeToCommand();
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+void subscribeToCommand() {
+  String topic = "kp1/" + APP_VERSION + "/cex/" + TOKEN + "/command/SWITCH/status";
+  client.subscribe(topic.c_str());
+  Serial.println("Subscribed on topic: " + topic);
+}
+
+===== ./example_node-red/node_red_flows.json =====
+[
+    {
+        "id": "64f52903c284b545",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "30a7782ba04b1a60",
+        "type": "ui_gauge",
+        "z": "64f52903c284b545",
+        "name": "",
+        "group": "a7841362.ae40c",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "gtype": "gage",
+        "title": "Temperature Data",
+        "label": "deg C",
+        "format": "{{value}}",
+        "min": 0,
+        "max": "100",
+        "colors": [
+            "#00b500",
+            "#e6e600",
+            "#ca3838"
+        ],
+        "seg1": "",
+        "seg2": "",
+        "diff": false,
+        "className": "",
+        "x": 490,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "e6a00cc180f7067b",
+        "type": "http request",
+        "z": "64f52903c284b545",
+        "name": "",
+        "method": "GET",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "192.168.134.180/dht-temp",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 300,
+        "y": 480,
+        "wires": [
+            [
+                "30a7782ba04b1a60"
+            ]
+        ]
+    },
+    {
+        "id": "691c4dc63f202da8",
+        "type": "inject",
+        "z": "64f52903c284b545",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "3",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 130,
+        "y": 480,
+        "wires": [
+            [
+                "e6a00cc180f7067b"
+            ]
+        ]
+    },
+    {
+        "id": "48feb7d8a567f7a7",
+        "type": "ui_gauge",
+        "z": "64f52903c284b545",
+        "name": "",
+        "group": "a7841362.ae40c",
+        "order": 1,
+        "width": 0,
+        "height": 0,
+        "gtype": "gage",
+        "title": "Humidity Data",
+        "label": "%",
+        "format": "{{value}}",
+        "min": 0,
+        "max": "100",
+        "colors": [
+            "#00b500",
+            "#e6e600",
+            "#ca3838"
+        ],
+        "seg1": "",
+        "seg2": "",
+        "className": "",
+        "x": 1040,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "3392fb2a675e207b",
+        "type": "http request",
+        "z": "64f52903c284b545",
+        "name": "",
+        "method": "GET",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "192.168.134.180/dht-hum",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 850,
+        "y": 420,
+        "wires": [
+            [
+                "48feb7d8a567f7a7"
+            ]
+        ]
+    },
+    {
+        "id": "60b07f05b391fec5",
+        "type": "inject",
+        "z": "64f52903c284b545",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "5",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 670,
+        "y": 420,
+        "wires": [
+            [
+                "3392fb2a675e207b"
+            ]
+        ]
+    },
+    {
+        "id": "a7841362.ae40c",
+        "type": "ui_group",
+        "name": "My studio",
+        "tab": "2ff36ff5.bdc628",
+        "order": 1,
+        "disp": true,
+        "width": "6",
+        "collapse": false
+    },
+    {
+        "id": "2ff36ff5.bdc628",
+        "type": "ui_tab",
+        "name": "Studio_control",
+        "icon": "dashboard",
+        "disabled": false,
+        "hidden": false
+    }
+]
+
+===== ./output.txt =====
+
+
